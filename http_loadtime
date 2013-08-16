@@ -1,0 +1,157 @@
+#!/usr/bin/env ruby
+
+# Plugin to graph http loadtimes
+
+# Dependencies
+# daemonize gem
+# wget binary
+# time binary
+
+
+# Parameters:
+#
+#       config   (required)
+#       autoconf (optional - used by lrrd-config)
+#
+# Configuration example:
+#
+# [wget_page]
+# timeout 30
+# env.names url1 url2
+# env.timeout 20
+# env.error_value 60
+# env.max 120
+#
+# env.url_url1 www1.example.com
+# env.proto_url1 http
+# env.port_url1 80
+# env.path_url1 path1/page1
+# env.label_url1 Example URL#1
+# env.timeout_url1 10
+# env.warning_url1 5
+# env.critical_url1 8
+#
+# env.url_url2 www2.example.com
+# env.label_url2 Example URL#2
+# env.proto_url2 https
+# env.port_url2 443
+# env.path_url2 path2/page2
+# env.timeout_url2 30
+# env.warning_url2 15
+# env.critical_url2 20
+# env.wget_opts_url2 --no-cache --tries=1 --no-check-certificate
+#
+# URL options:
+#
+# You can define the following options for each specified URL
+# as seen in the above example.
+#
+# - url: the URL to be downloaded with Wget
+# - label: the label assigned to the line of the given in URL in the graph
+# - timeout: the value passed to Wget through the "--timeout" option.
+# - warning: the value for the given URL that stands for the warning level
+# - critical: the value for the given URL that stands for the critical level
+# - max: the maximum value for the given URL (values above this will be
+#     discarded)
+# - wget_opts: various options supplied to the Wget command for the given URL.
+#
+
+DATA_DIR="/var/munin/run/http_loadtime"
+
+
+# Get the urls from config.
+def get_urls()
+  if (! ENV['names'])
+    # We have no hosts to check, let's bail
+  exit 1
+  end
+  urls = []
+  i = 1
+  ENV['names'].split(" ").each do |cururl|
+    thisurl = {}
+    # Label and url are required.
+    thisurl[:label] = ENV["label_#{cururl}"]
+    thisurl[:url] = ENV["url_#{cururl}"]
+    thisurl[:name] = cururl
+    # optional parameters
+    thisurl[:warning] = (ENV["warning_#{cururl}"].nil?)?  0 : ENV["warning_#{cururl}"]
+    thisurl[:critical] = (ENV["critical_#{cururl}"].nil?)? 0 : ENV["critical_#{cururl}"]
+    thisurl[:max] = (ENV["max_#{cururl}"].nil?)? nil : ENV["max_#{cururl}"]
+    thisurl[:port] = (ENV["port_#{cururl}"].nil?)? nil : ENV["port_#{cururl}"]
+    thisurl[:path] = (ENV["path_#{cururl}"].nil?)? nil : ENV["path_#{cururl}"]
+    thisurl[:wget_post_data] = (ENV["wget_post_data_#{cururl}"].nil?)? nil : ENV["wget_post_data_#{cururl}"]
+    thisurl[:error_value] = (ENV["error_value_#{cururl}"].nil?)? nil : ENV["error_value_#{cururl}"]
+    thisurl[:regex_error_value] = (ENV["regex_error_value_#{cururl}"].nil?)? nil : ENV["regex_error_value_#{cururl}"]
+    thisurl[:regex_header_1] = (ENV["regex_header_1_#{cururl}"].nil?)? nil : ENV["regex_header_1_#{cururl}"]
+    thisurl[:grep_opts] = (ENV["grep_opts_#{cururl}"].nil?)? nil : ENV["grep_opts_#{cururl}"]
+    thisurl[:wget_opts] = (ENV["wget_opts_#{cururl}"].nil?)? nil : ENV["wget_opts_#{cururl}"]
+    thisurl[:join_lines] = (ENV["join_lines_#{cururl}"].nil?)? nil : ENV["join_lines_#{cururl}"]
+    thisurl[:index] = i
+    thisurl[:wget_output_file] = DATA_DIR + "/tmp/wget_output_"+cururl
+    urls[i-1] = thisurl
+    i+=1
+  end
+  return urls
+end
+
+
+# Print the latest run results.
+def latest_reports(urls)
+  urls.each do |cururl|
+    if cururl.nil?
+      next
+    end
+    # read from our last run
+    filename = DATA_DIR + "/#{cururl[:label]}.last_run"
+    begin
+      f = File.open(filename, "r")
+      runtime = f.read
+      f.close
+    rescue
+      runtime = 30
+    end
+    puts "loadtime#{cururl[:index]}.value #{runtime}"
+  end
+end
+
+
+
+# Main program running
+
+case ARGV[0]
+when "config"
+  urls = get_urls()
+  puts "graph_title wget loadtime of webpages"
+  puts "graph_args --base 1000 -l 0"
+  puts "graph_vlabel Load time in seconds"
+  puts "graph_category http"
+  puts "graph_info This graph shows load time in seconds of one or more urls"
+  # for each url
+  i=1
+  urls.each do |cururl|
+    puts "loadtime#{i}.label #{cururl[:label]}"
+    puts "loadtime#{i}.info Load time for #{cururl[:url]}"
+    puts "loadtime#{i}.min 0"
+    puts "loadtime#{i}.max #{cururl[:max]}"
+    if cururl[:warning] > 0
+      puts "loadtime#{i}.warning #{cururl[:warning]}"
+    end
+    if cururl[:critical] > 0
+      puts "loadtime#{i}.critical #{cururl[:critical]}"
+    end
+    i+=1
+  end
+when "autoconf"
+  if Process.euid == 0
+    puts "yes"
+  else
+    puts "no"
+  end
+else
+  urls = get_urls()
+  # Report our latest load time results!
+  latest_reports(urls)
+  # ensure the daemon is running
+  `ruby /usr/share/munin/plugins/http_loadtime_launcher.rb start`
+end
+exit 0
