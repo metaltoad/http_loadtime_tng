@@ -1,4 +1,4 @@
-http_loadtime_tng
+HTTP loadtime TNG
 =================
 
 A Webpage loadtime plugin for Munin
